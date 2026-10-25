@@ -7,6 +7,7 @@
  */
 
 import { type Locator } from "@playwright/test";
+import { FACE_VIDEO_SEGMENT } from "../fixtures/mock-data/face-video";
 import { test, expect, type FrigateApp } from "../fixtures/frigate-test";
 import {
   basicFacesMock,
@@ -68,13 +69,11 @@ async function installGroupedFaces(
     faces: groupedFacesMock(),
   });
 
-  // api-mocker does not cover /api/event_ids, which the card needs to link to
-  // Explore. Registered after install so it takes precedence.
-  if (opts.withEventIds) {
-    await app.page.route("**/api/event_ids**", (route) =>
-      route.fulfill({ json: [GROUPED_EVENT] }),
-    );
-  }
+  // Return metadata only when the test needs the associated event. Missing
+  // metadata is an empty list, so no request reaches the preview server.
+  await app.page.route("**/api/event_ids**", (route) =>
+    route.fulfill({ json: opts.withEventIds ? [GROUPED_EVENT] : [] }),
+  );
 }
 
 async function openGroupedFaceDialog(app: FrigateApp): Promise<Locator> {
@@ -445,6 +444,10 @@ test.describe("FaceSelectionDialog @high", () => {
       ],
     });
 
+    await frigateApp.page.route("**/api/event_ids**", (route) =>
+      route.fulfill({ json: [] }),
+    );
+
     // Re-route /api/faces to flip to the "train empty" payload once the
     // classify POST has been received. Registered AFTER installDefaults so
     // Playwright's LIFO route matching hits this handler first.
@@ -577,5 +580,333 @@ test.describe("Face Library — mobile @high @mobile", () => {
     await expect(menu).not.toBeVisible({ timeout: 3_000 });
     await waitForBodyInteractive(frigateApp.page);
     await expectBodyInteractive(frigateApp.page);
+  });
+});
+
+test.describe("Face Library without reference images @high @mobile", () => {
+  test("shows unknown detected faces before a named collection exists", async ({
+    frigateApp,
+  }) => {
+    await frigateApp.installDefaults({
+      faces: withGroupedTrainingAttempt(
+        {},
+        {
+          eventId: GROUPED_EVENT_ID,
+          attempts: [
+            { timestamp: 1775487131.3863528, label: "unknown", score: 0 },
+          ],
+        },
+      ),
+    });
+    await frigateApp.page.route("**/api/event_ids**", (route) =>
+      route.fulfill({ json: [GROUPED_EVENT] }),
+    );
+    await frigateApp.goto("/faces");
+    await expect(
+      frigateApp.page.locator('img[src*="clips/faces/train/"]'),
+    ).toHaveCount(1);
+    await expect(
+      frigateApp.page.getByText("Unknown", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      frigateApp.page
+        .getByRole("button")
+        .filter({ hasText: /\(\d+\)/ })
+        .first(),
+    ).toContainText("1");
+  });
+
+  test("explains automatic collection while the library is empty", async ({
+    frigateApp,
+  }) => {
+    await frigateApp.installDefaults({ faces: {} });
+    await frigateApp.goto("/faces");
+    await expect(
+      frigateApp.page.getByText("Waiting for faces", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      frigateApp.page.getByText(
+        /Detected faces will appear here, including unknown people/,
+      ),
+    ).toBeVisible();
+  });
+});
+
+test.describe("Face video context @high @mobile", () => {
+  const capturedAt = GROUPED_EVENT.start_time + 8;
+  const playlist =
+    "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:20\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:20.000,\nface-context.ts\n#EXT-X-ENDLIST\n";
+
+  async function installVideo(
+    app: FrigateApp,
+    options: {
+      hasClip?: boolean;
+      missingEvent?: boolean;
+      available?: boolean;
+    } = {},
+  ) {
+    const state = {
+      available: options.available ?? true,
+      requests: [] as string[],
+    };
+    await app.installDefaults({
+      faces: withGroupedTrainingAttempt(
+        {},
+        {
+          eventId: GROUPED_EVENT_ID,
+          attempts: [{ timestamp: capturedAt, label: "unknown", score: 0 }],
+        },
+      ),
+    });
+    await app.page.route("**/api/event_ids**", (route) =>
+      route.fulfill({
+        json: options.missingEvent
+          ? []
+          : [{ ...GROUPED_EVENT, has_clip: options.hasClip ?? true }],
+      }),
+    );
+    await app.page.route("**/vod/**", (route) => {
+      state.requests.push(route.request().url());
+      return route.fulfill(
+        new URL(route.request().url()).pathname.endsWith(".ts")
+          ? {
+              contentType: "video/mp2t",
+              body: FACE_VIDEO_SEGMENT,
+            }
+          : {
+              contentType: "application/vnd.apple.mpegurl",
+              body: state.available ? playlist : "#EXTM3U\n#EXT-X-ENDLIST\n",
+            },
+      );
+    });
+    await app.goto("/faces");
+    await app.page
+      .locator('img[src*="clips/faces/train/"]')
+      .first()
+      .locator("xpath=..")
+      .click();
+    return state;
+  }
+
+  async function closeVideoPopup(app: FrigateApp) {
+    if (app.isMobile) {
+      await app.page
+        .getByRole("button", { name: "Go back", exact: true })
+        .click();
+    } else {
+      await app.page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Close", exact: true })
+        .click();
+    }
+  }
+
+  async function expectPlaying(page: FrigateApp["page"]) {
+    const video = page.locator("video");
+    await expect(video).toHaveCount(1);
+    await expect
+      .poll(
+        () =>
+          video.evaluate((element) => (element as HTMLVideoElement).readyState),
+        { timeout: 10000 },
+      )
+      .toBeGreaterThanOrEqual(2);
+    await expect(video).toHaveJSProperty("paused", false);
+    await expect
+      .poll(() =>
+        video.evaluate((element) => (element as HTMLVideoElement).currentTime),
+      )
+      .toBeGreaterThan(2);
+  }
+
+  test("loads and plays the matching recording only on request", async ({
+    frigateApp,
+  }) => {
+    const state = await installVideo(frigateApp);
+    const page = frigateApp.page;
+    const panel = page.getByRole("region", { name: "Video for this face" });
+    await expect(
+      panel.getByRole("button", { name: "Show video", exact: true }),
+    ).toBeVisible();
+    expect(state.requests).toHaveLength(0);
+    await expect(page.locator("video")).toHaveCount(0);
+    await panel
+      .getByRole("button", { name: "Show video", exact: true })
+      .click();
+    await expectPlaying(page);
+    const dimensions = await page.locator("video").evaluate((video) => ({
+      video: video.getBoundingClientRect().height,
+      viewport: window.innerHeight,
+    }));
+    expect(dimensions.video).toBeLessThanOrEqual(dimensions.viewport * 0.4 + 1);
+    const request = state.requests.find((url) => url.endsWith("index.m3u8"))!;
+    const parts = new URL(request).pathname.split("/");
+    expect(parts[2]).toBe("front_door");
+    expect(Number(parts[4])).toBeCloseTo(capturedAt - 5);
+    expect(Number(parts[6])).toBeCloseTo(capturedAt + 15);
+    await panel
+      .getByRole("button", { name: "Hide video", exact: true })
+      .click();
+    await expect(page.locator("video")).toHaveCount(0);
+    await expect(
+      page.getByText("Unknown", { exact: true }).first(),
+    ).toBeVisible();
+  });
+
+  test("keeps the finished clip visible with its playback controls", async ({
+    frigateApp,
+  }) => {
+    const { page } = frigateApp;
+    await installVideo(frigateApp);
+    await page.getByRole("button", { name: "Show video", exact: true }).click();
+    await expect
+      .poll(() =>
+        page
+          .locator("video")
+          .evaluate((video) => (video as HTMLVideoElement).readyState),
+      )
+      .toBeGreaterThanOrEqual(2);
+    await page.locator("video").evaluate((element) => {
+      const video = element as HTMLVideoElement;
+      video.currentTime = video.duration - 0.25;
+    });
+    await expect
+      .poll(() =>
+        page
+          .locator("video")
+          .evaluate((video) => (video as HTMLVideoElement).ended),
+      )
+      .toBe(true);
+    // Exercise the delayed stalled notification emitted by the shared player.
+    await page.waitForTimeout(3500);
+    await expect(page.locator("video")).toHaveCount(1);
+    await expect(page.locator("video")).toHaveJSProperty("controls", true);
+    await expect(
+      page.getByText("No recording is available for this face.", {
+        exact: false,
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("ignores a delayed buffering notification after playback recovers", async ({
+    frigateApp,
+  }) => {
+    await installVideo(frigateApp);
+    const { page } = frigateApp;
+    await page.getByRole("button", { name: "Show video", exact: true }).click();
+    await expectPlaying(page);
+    await page.locator("video").evaluate((element) => {
+      element.dispatchEvent(new Event("waiting"));
+    });
+    await page.waitForTimeout(3500);
+    await expectPlaying(page);
+  });
+
+  test("closing the face popup removes the player and reopening leaves it optional", async ({
+    frigateApp,
+  }) => {
+    const state = await installVideo(frigateApp);
+    const page = frigateApp.page;
+    await page.getByRole("button", { name: "Show video", exact: true }).click();
+    await expectPlaying(page);
+    const detachedVideo = await page.locator("video").elementHandle();
+    await closeVideoPopup(frigateApp);
+    await expect(page.locator("video")).toHaveCount(0);
+    expect(
+      await detachedVideo!.evaluate(
+        (element) => (element as HTMLVideoElement).paused,
+      ),
+    ).toBe(true);
+    expect(await detachedVideo!.getAttribute("src")).toBeNull();
+    const count = state.requests.length;
+    await page
+      .locator('img[src*="clips/faces/train/"]')
+      .first()
+      .locator("xpath=..")
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Show video", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("video")).toHaveCount(0);
+    expect(state.requests.length).toBe(count);
+  });
+
+  for (const [label, options] of [
+    ["expired recording", { hasClip: false }],
+    ["deleted event", { missingEvent: true }],
+  ] as const) {
+    test(`handles an ${label} without requesting video`, async ({
+      frigateApp,
+    }) => {
+      const state = await installVideo(frigateApp, options);
+      await expect(
+        frigateApp.page.getByText(/No recording is available for this face/),
+      ).toBeVisible();
+      await expect(
+        frigateApp.page.getByRole("button", {
+          name: "Show video",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      expect(state.requests).toHaveLength(0);
+    });
+  }
+
+  test("shows an unavailable recording and can retry", async ({
+    frigateApp,
+  }) => {
+    const state = await installVideo(frigateApp, { available: false });
+    const page = frigateApp.page;
+    await page.getByRole("button", { name: "Show video", exact: true }).click();
+    await expect(
+      page.getByText(/No recording is available for this face/),
+    ).toBeVisible();
+    await expect(page.locator("video")).toHaveCount(0);
+    state.available = true;
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expectPlaying(page);
+  });
+
+  test.describe("pending request cleanup", () => {
+    test.use({ expectedErrors: [/net::ERR_ABORTED .*\/vod\//] });
+    test("closing the popup cancels an outstanding recording request", async ({
+      frigateApp,
+    }) => {
+      await installVideo(frigateApp);
+      const page = frigateApp.page;
+      let release = () => {};
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const aborted: string[] = [];
+      page.on("requestfailed", (request) => {
+        if (
+          request.url().includes("/vod/") &&
+          request.failure()?.errorText.includes("ABORTED")
+        )
+          aborted.push(request.url());
+      });
+      await page.route("**/vod/**/index.m3u8", async (route) => {
+        await waiting;
+        await route
+          .fulfill({
+            contentType: "application/vnd.apple.mpegurl",
+            body: playlist,
+          })
+          .catch(() => {});
+      });
+      try {
+        const request = page.waitForRequest("**/vod/**/index.m3u8");
+        await page
+          .getByRole("button", { name: "Show video", exact: true })
+          .click();
+        await request;
+        await closeVideoPopup(frigateApp);
+        await expect.poll(() => aborted.length).toBeGreaterThan(0);
+        await expect(page.locator("video")).toHaveCount(0);
+      } finally {
+        release();
+      }
+    });
   });
 });

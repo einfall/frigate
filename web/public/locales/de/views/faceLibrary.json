@@ -50,8 +50,8 @@
     "empty": "Es gibt keine aktuellen Versuche zur Gesichtserkennung",
     "titleShort": "Neu",
     "emptyNoLibrary": {
-      "title": "Gesicht hinzufügen",
-      "description": "Sie müssen mindestens ein Gesicht zur Bibliothek hinzufügen, damit die Gesichtserkennung funktioniert."
+      "title": "Warten auf Gesichter",
+      "description": "Erkannte Gesichter erscheinen hier, auch von unbekannten Personen. Sie können einem erkannten Gesicht einen Namen zuweisen oder ein Referenzfoto hochladen, um bekannte Personen zu erkennen."
     }
   },
   "deleteFaceLibrary": {
@@ -106,5 +106,15 @@
   "nofaces": "Keine Gesichter verfügbar",
   "pixels": "{{area}}px",
   "reclassifyFaceAs": "Gesicht neu klassifizieren als:",
-  "reclassifyFace": "Gesicht neu klassifizieren"
+  "reclassifyFace": "Gesicht neu klassifizieren",
+  "video": {
+    "label": "Video zu diesem Gesicht",
+    "show": "Video anzeigen",
+    "hide": "Video ausblenden",
+    "loadingEvent": "Ereignis wird geladen…",
+    "loading": "Video wird geladen…",
+    "unavailable": "Für dieses Gesicht ist keine Aufnahme verfügbar. Sie wurde möglicherweise nicht aufbewahrt.",
+    "retry": "Erneut versuchen",
+    "description": "Aufnahme rund um diese Gesichtserkennung. Die Wiedergabe startet kurz vor dem Gesichtsausschnitt."
+  }
 }

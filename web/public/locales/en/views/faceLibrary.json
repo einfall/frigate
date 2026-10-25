@@ -34,8 +34,8 @@
     "aria": "Select recent recognitions",
     "empty": "There are no recent face recognition attempts",
     "emptyNoLibrary": {
-      "title": "Upload a face",
-      "description": "You must add at least one face to the library for face recognition to function."
+      "title": "Waiting for faces",
+      "description": "Detected faces will appear here, including unknown people. You can assign a name to a detected face or upload a reference photo to identify known people."
     }
   },
   "deleteFaceLibrary": {
@@ -96,5 +96,15 @@
       "reclassifyFailed": "Failed to reclassify face: {{errorMessage}}",
       "updateFaceScoreFailed": "Failed to update face score: {{errorMessage}}"
     }
+  },
+  "video": {
+    "label": "Video for this face",
+    "show": "Show video",
+    "hide": "Hide video",
+    "loadingEvent": "Loading event…",
+    "loading": "Loading video…",
+    "unavailable": "No recording is available for this face. It may no longer be retained.",
+    "retry": "Try again",
+    "description": "Recording around this face detection. Playback starts shortly before the face was captured."
   }
 }

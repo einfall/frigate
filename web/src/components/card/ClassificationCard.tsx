@@ -201,6 +201,7 @@ type GroupedClassificationCardProps = {
   i18nLibrary: string;
   objectType: string;
   noClassificationLabel?: string;
+  detailContent?: React.ReactNode;
   onClick: (data: ClassificationItemData | undefined) => void;
   children?: (data: ClassificationItemData) => React.ReactNode;
 };
@@ -211,6 +212,7 @@ export function GroupedClassificationCard({
   selectedItems,
   i18nLibrary,
   noClassificationLabel = "details.none",
+  detailContent,
   onClick,
   children,
 }: GroupedClassificationCardProps) {
@@ -372,6 +374,7 @@ export function GroupedClassificationCard({
         <Content
           className={cn(
             "scrollbar-container",
+            detailContent && "max-h-[90dvh] overflow-y-auto",
             isDesktop && "min-w-[50%] max-w-[65%]",
             isMobile && "overflow-y-auto",
           )}
@@ -471,6 +474,7 @@ export function GroupedClassificationCard({
                 </div>
               )}
             </Header>
+            {detailOpen && detailContent}
             <div
               className={cn(
                 "grid w-full auto-rows-min grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-8",

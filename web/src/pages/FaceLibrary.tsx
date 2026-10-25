@@ -1,4 +1,5 @@
 import AddFaceIcon from "@/components/icons/AddFaceIcon";
+import FaceEventVideo from "@/components/player/FaceEventVideo";
 import ActivityIndicator from "@/components/indicators/activity-indicator";
 import { EmptyCard } from "@/components/card/EmptyCard";
 import CreateFaceWizardDialog from "@/components/overlay/detail/FaceCreateWizardDialog";
@@ -762,10 +763,9 @@ function TrainingGrid({
     [faceGroups],
   );
 
-  const { data: events } = useSWR<Event[]>([
-    "event_ids",
-    { ids: eventIdsQuery },
-  ]);
+  const { data: events, isLoading: eventsLoading } = useSWR<Event[]>(
+    eventIdsQuery ? ["event_ids", { ids: eventIdsQuery }] : null,
+  );
 
   if (attemptImages.length == 0) {
     if (isLoading) {
@@ -810,6 +810,7 @@ function TrainingGrid({
               config={config}
               group={group}
               event={event}
+              eventLoading={eventsLoading}
               faceNames={faceNames}
               selectedFaces={selectedFaces}
               onClickFaces={onClickFaces}
@@ -826,6 +827,7 @@ type FaceAttemptGroupProps = {
   config: FrigateConfig;
   group: ClassificationItemData[];
   event?: Event;
+  eventLoading: boolean;
   faceNames: string[];
   selectedFaces: string[];
   onClickFaces: (image: string[], ctrl: boolean) => void;
@@ -843,6 +845,7 @@ function FaceAttemptGroup({
   config,
   group,
   event,
+  eventLoading,
   faceNames,
   selectedFaces,
   onClickFaces,
@@ -1003,6 +1006,14 @@ function FaceAttemptGroup({
       i18nLibrary="views/faceLibrary"
       objectType="person"
       noClassificationLabel="details.unknown"
+      detailContent={
+        <FaceEventVideo
+          config={config}
+          event={event}
+          timestamp={group[0]?.timestamp}
+          loading={eventLoading}
+        />
+      }
       onClick={(data) => {
         if (data) {
           onClickFaces([data.filename], true);

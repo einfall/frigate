@@ -56,6 +56,7 @@ class FaceRealTimeProcessor(RealTimeProcessorApi):
         self.face_detector: cv2.FaceDetectorYN | None = None
         self.requires_face_detection = "face" not in self.config.objects.all_objects
         self.person_face_history: dict[str, list[tuple[str, float, int]]] = {}
+        self.unclassified_face_attempts: dict[str, int] = {}
         self.camera_current_people: dict[str, list[str]] = {}
         self.recognizer: FaceRecognizer
         self.faces_per_second = EventsPerSecond()
@@ -295,8 +296,15 @@ class FaceRealTimeProcessor(RealTimeProcessorApi):
 
         res = self.recognizer.classify(face_frame)
 
-        if not res:
-            logger.debug(f"Face recognizer returned no result for {id}")
+        if res is None:
+            # Collect faces before enrollment without consuming recognition attempts:
+            # a reference model may become available while this person is still here.
+            attempts = self.unclassified_face_attempts.get(id, 0)
+            if attempts < MAX_FACE_ATTEMPTS:
+                self.write_face_attempt(
+                    face_frame, id, datetime.datetime.now().timestamp(), "unknown", 0.0
+                )
+                self.unclassified_face_attempts[id] = attempts + 1
             self.__update_metrics(datetime.datetime.now().timestamp() - start)
             return
 
@@ -342,7 +350,10 @@ class FaceRealTimeProcessor(RealTimeProcessorApi):
             ),
         )
 
-        if weighted_score >= self.face_config.recognition_threshold:
+        if (
+            weighted_sub_label
+            and weighted_score >= self.face_config.recognition_threshold
+        ):
             self.sub_label_publisher.publish(
                 (id, weighted_sub_label, weighted_score),
                 EventMetadataTypeEnum.sub_label.value,
@@ -483,6 +494,7 @@ class FaceRealTimeProcessor(RealTimeProcessorApi):
         return None
 
     def expire_object(self, object_id: str, camera: str) -> None:
+        self.unclassified_face_attempts.pop(object_id, None)
         if object_id in self.person_face_history:
             self.person_face_history.pop(object_id)
 
