@@ -140,6 +140,7 @@ export default function Events() {
     return {
       after: getBeginningOfDayTimestamp(date),
       before: Math.min(getEndOfDayTimestamp(date), now),
+      datePreset: undefined,
     };
   }, []);
 
@@ -311,15 +312,31 @@ export default function Events() {
     return { before: beforeTs, after: getHoursAgo(24) };
   }, [beforeTs]);
   const selectedTimeRange = useMemo(() => {
-    if (reviewSearchParams["after"] == undefined) {
+    // Motion timelines process dense activity data and stay limited to one day.
+    if (
+      reviewSearchParams["after"] == undefined ||
+      (severity === "significant_motion" && reviewFilter?.datePreset)
+    ) {
       return last24Hours;
     }
 
     return {
-      before: Math.ceil(reviewSearchParams["before"]),
+      before: Math.ceil(reviewSearchParams["before"] ?? last24Hours.before),
       after: Math.floor(reviewSearchParams["after"]),
     };
-  }, [last24Hours, reviewSearchParams]);
+  }, [last24Hours, reviewSearchParams, severity, reviewFilter?.datePreset]);
+
+  // Clear the period selection when entering Motion, including restored state.
+  useEffect(() => {
+    if (severity === "significant_motion" && reviewFilter?.datePreset) {
+      setReviewFilter({
+        ...reviewFilter,
+        after: undefined,
+        before: undefined,
+        datePreset: undefined,
+      });
+    }
+  }, [severity, reviewFilter, setReviewFilter]);
 
   // we want to update the items whenever the severity changes
   useEffect(() => {
@@ -352,11 +369,11 @@ export default function Events() {
       labels: reviewSearchParams["labels"],
       zones: reviewSearchParams["zones"],
       reviewed: null, // We want both reviewed and unreviewed items as we filter in the UI
-      before: reviewSearchParams["before"] || last24Hours.before,
-      after: reviewSearchParams["after"] || last24Hours.after,
+      before: selectedTimeRange.before,
+      after: selectedTimeRange.after,
     };
     return ["review", params];
-  }, [reviewSearchParams, reviewCamerasParam, last24Hours, timezone]);
+  }, [reviewSearchParams, reviewCamerasParam, selectedTimeRange, timezone]);
 
   const { data: reviews, mutate: updateSegments } = useSWR<ReviewSegment[]>(
     getKey,

@@ -80,6 +80,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { FilterList, LAST_24_HOURS_KEY } from "@/types/filter";
+import { formatInTimeZone } from "date-fns-tz";
+import { useTimezone } from "@/hooks/use-date-utils";
 import { GiSoundWaves } from "react-icons/gi";
 import useKeyboardListener from "@/hooks/use-keyboard-listener";
 import { useTimelineZoom } from "@/hooks/use-timeline-zoom";
@@ -152,9 +154,37 @@ export default function EventView({
   const { data: config } = useSWR<FrigateConfig>("config");
   const contentRef = useRef<HTMLDivElement | null>(null);
 
+  const timezone = useTimezone(config);
+
   // review counts
 
   const reviewCounts = useMemo(() => {
+    if (filter?.datePreset) {
+      if (!reviewItems) return { alert: -1, detection: -1, significant_motion: -1 };
+      const visible = (item: ReviewSegment) => showReviewed || !item.has_been_reviewed;
+      if (filter.before == undefined && filter.after != undefined && reviewSummary && timezone) {
+        const firstDay = formatInTimeZone(filter.after * 1000, timezone, "yyyy-MM-dd");
+        const days = Object.entries(reviewSummary).filter(([day]) =>
+          /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= firstDay,
+        );
+        const count = (severity: "alert" | "detection") =>
+          days.reduce((total, [, day]) => total + day[`total_${severity}`] -
+            (showReviewed ? 0 : day[`reviewed_${severity}`]), 0) +
+          // Daily summaries group by start time; retain items spanning midnight.
+          reviewItems[severity].filter((item) => item.start_time < filter.after! && visible(item)).length;
+        return {
+          alert: count("alert"),
+          detection: count("detection"),
+          significant_motion: reviewItems.significant_motion.filter(visible).length,
+        };
+      }
+      return {
+        alert: reviewItems.alert.filter(visible).length,
+        detection: reviewItems.detection.filter(visible).length,
+        significant_motion: reviewItems.significant_motion.filter(visible).length,
+      };
+    }
+
     if (!reviewSummary) {
       return { alert: -1, detection: -1, significant_motion: -1 };
     }
@@ -183,7 +213,7 @@ export default function EventView({
         detection: summary.total_detection - summary.reviewed_detection,
       };
     }
-  }, [filter, showReviewed, reviewSummary]);
+  }, [filter, showReviewed, reviewSummary, reviewItems, timezone]);
 
   const emptyCardData: EmptyCardData = useMemo(() => {
     if (
@@ -462,6 +492,7 @@ export default function EventView({
 
           {selectedReviews.length <= 0 ? (
             <ReviewFilterGroup
+              enableDatePresets={severityToggle !== "significant_motion"}
               filters={
                 severity == "significant_motion"
                   ? ["cameras", "date", "motionOnly"]
@@ -1200,6 +1231,7 @@ function MotionReview({
         ...filter,
         after: day == undefined ? undefined : day.getTime() / 1000,
         before: day == undefined ? undefined : getEndOfDayTimestamp(day),
+        datePreset: undefined,
       });
     },
     [filter, updateFilter],

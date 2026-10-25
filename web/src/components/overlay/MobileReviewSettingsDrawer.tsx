@@ -31,6 +31,7 @@ import { StartExportResponse } from "@/types/export";
 import { ShareTimestampContent } from "./ShareTimestampDialog";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import { cn } from "@/lib/utils";
+import ReviewDatePresets from "../filter/ReviewDatePresets";
 
 type DrawerMode =
   | "none"
@@ -61,6 +62,7 @@ const DEFAULT_DRAWER_FEATURES: DrawerFeatures[] = [
 
 type MobileReviewSettingsDrawerProps = {
   features?: DrawerFeatures[];
+  enableDatePresets?: boolean;
   camera: string;
   filter?: ReviewFilter;
   currentSeverity?: ReviewSeverity;
@@ -87,6 +89,7 @@ type MobileReviewSettingsDrawerProps = {
 };
 export default function MobileReviewSettingsDrawer({
   features = DEFAULT_DRAWER_FEATURES,
+  enableDatePresets = false,
   camera,
   filter,
   currentSeverity,
@@ -499,7 +502,7 @@ export default function MobileReviewSettingsDrawer({
     );
   } else if (drawerMode == "calendar") {
     content = (
-      <div className="flex w-full flex-col">
+      <div className="scrollbar-container flex min-h-0 w-full flex-col overflow-y-auto">
         <div className="relative h-8 w-full">
           <div
             className="absolute left-0 text-selected"
@@ -511,6 +514,9 @@ export default function MobileReviewSettingsDrawer({
             {t("calendar")}
           </div>
         </div>
+        {enableDatePresets && (
+          <ReviewDatePresets filter={filter} onUpdateFilter={onUpdateFilter} onSelect={() => setDrawerMode("none")} />
+        )}
         <div className="flex w-full flex-row justify-center">
           <ReviewActivityCalendar
             reviewSummary={reviewSummary}
@@ -523,6 +529,7 @@ export default function MobileReviewSettingsDrawer({
             onSelect={(day) => {
               onUpdateFilter({
                 ...filter,
+                datePreset: undefined,
                 after: day == undefined ? undefined : day.getTime() / 1000,
                 before:
                   day == undefined ? undefined : getEndOfDayTimestamp(day),
@@ -539,6 +546,7 @@ export default function MobileReviewSettingsDrawer({
                 ...filter,
                 after: undefined,
                 before: undefined,
+                datePreset: undefined,
               });
             }}
           >

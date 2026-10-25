@@ -3,7 +3,8 @@ import {
   useFormattedTimestamp,
   useTimezone,
 } from "@/hooks/use-date-utils";
-import { RecordingsSummary, ReviewSummary } from "@/types/review";
+import { RecordingsSummary, ReviewFilter, ReviewSummary } from "@/types/review";
+import ReviewDatePresets from "./ReviewDatePresets";
 import { Button } from "../ui/button";
 import { FaCalendarAlt } from "react-icons/fa";
 import ReviewActivityCalendar from "../overlay/ReviewActivityCalendar";
@@ -25,12 +26,16 @@ type CalendarFilterButtonProps = {
   recordingsSummary?: RecordingsSummary;
   day?: Date;
   updateSelectedDay: (day?: Date) => void;
+  reviewFilter?: ReviewFilter;
+  updateReviewFilter?: (filter: ReviewFilter) => void;
 };
 export default function CalendarFilterButton({
   reviewSummary,
   recordingsSummary,
   day,
   updateSelectedDay,
+  reviewFilter,
+  updateReviewFilter,
 }: CalendarFilterButtonProps) {
   const { t } = useTranslation(["components/filter", "views/events"]);
   const { data: config } = useSWR<FrigateConfig>("config");
@@ -54,7 +59,9 @@ export default function CalendarFilterButton({
       <div
         className={`hidden md:block ${day == undefined ? "text-primary" : "text-selected-foreground"}`}
       >
-        {day == undefined
+        {reviewFilter?.datePreset
+          ? t(`calendarFilter.${reviewFilter.datePreset}`, { ns: "views/events" })
+          : day == undefined
           ? t("calendarFilter.last24Hours", { ns: "views/events" })
           : selectedDate}
       </div>
@@ -62,6 +69,12 @@ export default function CalendarFilterButton({
   );
   const content = (
     <>
+      {updateReviewFilter && (
+        <>
+          <ReviewDatePresets filter={reviewFilter} onUpdateFilter={updateReviewFilter} onSelect={() => setOpen(false)} />
+          <DropdownMenuSeparator />
+        </>
+      )}
       <ReviewActivityCalendar
         reviewSummary={reviewSummary}
         recordingsSummary={recordingsSummary}

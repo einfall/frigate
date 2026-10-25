@@ -30,7 +30,12 @@
     "invalidSharedCamera": "Der Link zur zeitgestempelten Aufzeichnung kann nicht geöffnet werden, da es sich um eine unbekannte oder nicht autorisierte Kamera handelt."
   },
   "calendarFilter": {
-    "last24Hours": "Letzte 24 Stunden"
+    "last24Hours": "Letzte 24 Stunden",
+    "period": "Zeitraum auswählen",
+    "currentWeek": "Aktuelle Woche",
+    "lastWeek": "Letzte Woche",
+    "currentMonth": "Aktueller Monat",
+    "lastMonth": "Letzter Monat"
   },
   "newReviewItems": {
     "label": "Neue zu prüfende Objekte anschauen",
