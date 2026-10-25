@@ -236,15 +236,17 @@ test.describe("Review calendar period boundaries", () => {
   const iso = (timestamp?: number) => new Date(timestamp! * 1000).toISOString();
 
   for (const [preset, after, before] of [
-    ["currentWeek", "2026-10-18T22:00:00.000Z", "2026-10-24T17:00:00.000Z"],
+    ["currentWeek", "2026-10-18T22:00:00.000Z", undefined],
     ["lastWeek", "2026-10-11T22:00:00.000Z", "2026-10-18T22:00:00.000Z"],
-    ["currentMonth", "2026-09-30T22:00:00.000Z", "2026-10-24T17:00:00.000Z"],
+    ["currentMonth", "2026-09-30T22:00:00.000Z", undefined],
     ["lastMonth", "2026-08-31T22:00:00.000Z", "2026-09-30T22:00:00.000Z"],
   ] as const) {
     test(`${preset} uses local calendar boundaries`, () => {
       const range = getReviewPresetRange(preset, now, "Europe/Berlin", 1);
       expect(iso(range.after)).toBe(after);
-      expect(iso(range.before)).toBe(before);
+      expect(range.before == undefined ? undefined : iso(range.before)).toBe(
+        before,
+      );
     });
   }
 
@@ -354,6 +356,30 @@ test.describe("Review date presets @critical @mobile", () => {
         zones: [],
       },
     }));
+    await page.route("**/api/review/summary**", (route) =>
+      route.fulfill({
+        json: {
+          "2026-10-24": {
+            total_alert: 1,
+            reviewed_alert: 0,
+            total_detection: 0,
+            reviewed_detection: 0,
+          },
+          "2026-10-02": {
+            total_alert: 1,
+            reviewed_alert: 0,
+            total_detection: 0,
+            reviewed_detection: 0,
+          },
+          "2026-09-15": {
+            total_alert: 1,
+            reviewed_alert: 0,
+            total_detection: 0,
+            reviewed_detection: 0,
+          },
+        },
+      }),
+    );
     await page.route("**/api/review?*", (route) => {
       const params = new URL(route.request().url()).searchParams;
       const after = Number(params.get("after"));
@@ -421,5 +447,148 @@ test.describe("Review date presets @critical @mobile", () => {
     await expect(
       group.getByRole("button", { name: "Last 24 Hours", exact: true }),
     ).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+test.describe("Review period regressions @critical @mobile", () => {
+  for (const label of ["This Week", "This Month"]) {
+    test(`${label} offers new alerts and refreshes past its selection time`, async ({
+      frigateApp,
+    }) => {
+      const page = frigateApp.page;
+      const now = Date.parse("2026-10-24T17:00:00Z") / 1000;
+      await page.clock.install({ time: new Date(now * 1000) });
+      await frigateApp.installDefaults({
+        config: { ui: { timezone: "Europe/Berlin" } },
+      });
+      const makeReview = (start: number): ReviewSegment => ({
+        id: `${start}-live`,
+        camera: "front_door",
+        severity: "alert",
+        start_time: start,
+        end_time: start + 10,
+        has_been_reviewed: false,
+        thumb_path: "/clips/review/live.webp",
+        data: {
+          audio: [],
+          detections: [],
+          objects: ["person"],
+          significant_motion_areas: [],
+          zones: [],
+        },
+      });
+      const reviews = [makeReview(now - 300)];
+      await page.route("**/api/review?*", (route) => {
+        const params = new URL(route.request().url()).searchParams;
+        return route.fulfill({
+          json: reviews.filter(
+            (item) =>
+              item.start_time < Number(params.get("before")) &&
+              item.end_time! > Number(params.get("after")),
+          ),
+        });
+      });
+      await page.route("**/api/review/summary**", (route) =>
+        route.fulfill({
+          json: {
+            "2026-10-24": {
+              total_alert: reviews.length,
+              reviewed_alert: 0,
+              total_detection: 0,
+              reviewed_detection: 0,
+            },
+          },
+        }),
+      );
+      await frigateApp.goto("/review");
+      const review = new ReviewPage(page, !frigateApp.isMobile);
+      await expect(review.alertsTab).toBeVisible();
+      if (frigateApp.isMobile) {
+        await page
+          .getByRole("button", { name: "Filters", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: "Calendar", exact: true })
+          .click();
+      } else {
+        await review.calendarTrigger.click();
+      }
+      await page
+        .getByRole("group", { name: "Select time period" })
+        .getByRole("button", { name: label, exact: true })
+        .click();
+      await expect(review.reviewItems).toHaveCount(1);
+      reviews.push(makeReview(now + 20));
+      const summaryPoll = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/review/summary",
+      );
+      await page.clock.fastForward(61_000);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await summaryPoll;
+      await expect(review.alertsTab).toContainText("2");
+      const refresh = page.getByRole("button", {
+        name: "View new review items",
+      });
+      await expect(refresh).toBeVisible();
+      const nextRequest = page.waitForRequest(
+        (request) =>
+          new URL(request.url()).pathname === "/api/review" &&
+          Number(new URL(request.url()).searchParams.get("before")) > now + 20,
+      );
+      await refresh.click();
+      await nextRequest;
+      await expect(review.reviewItems).toHaveCount(2);
+      await expect(refresh).not.toBeVisible();
+    });
+  }
+
+  test("switching from a month to Motion requests at most 24 hours and hides long presets", async ({
+    frigateApp,
+  }) => {
+    const page = frigateApp.page;
+    await page.clock.install({ time: new Date("2026-10-24T17:00:00Z") });
+    await frigateApp.installDefaults();
+    const activityRanges: number[] = [];
+    await page.route("**/api/review/activity/motion?*", (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      activityRanges.push(
+        Number(params.get("before")) - Number(params.get("after")),
+      );
+      return route.fulfill({ json: [] });
+    });
+    await frigateApp.goto("/review");
+    const review = new ReviewPage(page, !frigateApp.isMobile);
+    await expect(review.alertsTab).toBeVisible();
+    const openCalendar = async () => {
+      if (frigateApp.isMobile) {
+        await page
+          .getByRole("button", { name: "Filters", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: "Calendar", exact: true })
+          .click();
+      } else {
+        await review.calendarTrigger.click();
+      }
+    };
+    await openCalendar();
+    await page
+      .getByRole("group", { name: "Select time period" })
+      .getByRole("button", { name: "Last Month", exact: true })
+      .click();
+    await review.motionTab.click();
+    await expect(review.motionTab).toHaveAttribute("data-state", "on");
+    await expect.poll(() => activityRanges.length).toBeGreaterThan(0);
+    // Alignment adds a small amount of padding around the 24-hour window.
+    expect(activityRanges.every((duration) => duration <= 86460)).toBe(true);
+    await openCalendar();
+    await expect(
+      page.getByRole("group", { name: "Select time period" }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    if (frigateApp.isMobile) await page.keyboard.press("Escape");
+    await review.alertsTab.click();
+    await expect(review.alertsTab).toHaveAttribute("data-state", "on");
   });
 });

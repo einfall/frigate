@@ -49,6 +49,6 @@ export function getReviewPresetRange(
   return {
     after: midnight(start),
     // The API uses an exclusive upper bound; no next-period events leak in.
-    before: end ? midnight(end) : Math.floor(now.getTime() / 1000),
+    before: end ? midnight(end) : undefined,
   };
 }
